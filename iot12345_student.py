@@ -158,7 +158,7 @@ class iot12345_student(player):
             return None
         return (min_x, max_x, min_y, max_y)
 
-    def generate_candidate_moves(self, board, length, color, my_color, opp_color, max_candidates=12):
+    def generate_candidate_moves(self, board, length, color, my_color, opp_color, max_candidates=14):
         """
         후보 수를 제한해서 반환:
         - 돌이 하나도 없으면 중앙 한 점
@@ -291,7 +291,7 @@ class iot12345_student(player):
             print(" === White player was completed ==== ")
             return stn
 
-        depth = 2  # 내 수 → 상대 수까지 본다
+        depth = 3  # 내 수 → 상대 수까지 본다
 
         best_score = -INF
         best_moves = []
