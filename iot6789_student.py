@@ -7,31 +7,29 @@ Maker : bychoi@deu.ac.kr
 @author: Com
 """
 
-# sample player file which must be made by student 
+# 사용자(사람)가 두는 흑돌용 클래스
+# player 클래스를 상속해서, next()에서 그대로 부모의 입력 로직을 사용한다.
 
 from player import *
 from stone import *
-from random import *
+
 
 class iot6789_student(player):
-     def __init__(self, clr):
-          super().__init__( clr)  # call constructor of super class, self 제거
-       
-     
-        
-     def __del__(self):  # destructor
-         pass 
-     
-     def next(self, board, length):  # override
-         print (" **** Black player : My Turns **** ")
-         stn = stone(self._color)  # protected variable 
-         while True:
-             x=randint(0,length-1) % length
-             y=randint(0,length-1) % length
-             if (board[x][y] ==0):
-                 break
-         stn.setX(x)
-         stn.setY(y)
-         print (" === Black player was completed ==== ")
-         return stn
-        
+    def __init__(self, clr):
+        # player._color 에 흑(-1) 값 들어옴
+        super().__init__(clr)
+
+    def __del__(self):
+        pass
+
+    def next(self, board, length):
+        """
+        원래 player 클래스의 next()는
+        - 콘솔에서 x, y 좌표를 입력받고
+        - 범위 체크 후 stone 객체를 반환하는 로직임.
+
+        여기서는 그걸 그대로 재사용해서,
+        '학생용 클래스' 형태를 유지하면서도
+        실제 동작은 사람이 직접 두도록 만든다.
+        """
+        return super().next(board, length)
