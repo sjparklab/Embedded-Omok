@@ -11,11 +11,8 @@ from board import *
 from player import *
 from iot6789_student import *
 from stone import *
-# 기존: from iot12345_student import *
-# 변경: AlphaZero 스타일 플레이어를 사용하도록 iot12345_az
-from iot12345_az import *
-# from iot12345_student import *
-# from iot6789_student import *
+from iot12345_student import *
+#from iot6789_student import *
 import time  # append by bychoi
 
 
@@ -25,10 +22,7 @@ class omokgame:
         self.__bd = board(self.__size)
         #self.__black = player(-1)
         self.__black = iot6789_student(-1)
-        # 기존: self.__white = iot12345_student(1)
-        # 변경: 기본 White 플레이어를 AlphaZero 스타일 구현(iot12345_az)로 설정
-        # model_path는 None으로 두면 모델 파일이 없어도 동작
-        self.__white = iot12345_az(1, model_path='az_net.pt', board_size=self.__size, device='cpu', n_sim=200)
+        self.__white = iot12345_student(1)
         self.__turns=0
         self.__next= -1
         self.__draw = 0
@@ -104,7 +98,7 @@ class omokgame:
             elif (self.__winner == 1):
                 print("White!!")
             
-            
+        
     def endCheck(self):
         # horizontal omok 
         for i  in range(0, self.__size):
@@ -113,7 +107,7 @@ class omokgame:
                     check=self.__bd.get(i,j)+self.__bd.get(i,j+1)+self.__bd.get(i,j+2)+self.__bd.get(i,j+3)+self.__bd.get(i,j+4)
                     if (check == (5 * self.__bd.get(i,j))):
                         return True
-                     
+                    
         # vertical omok
         for i  in range(0, self.__size):
             for j  in range(0, self.__size-4):
@@ -121,7 +115,7 @@ class omokgame:
                     check=self.__bd.get(j,i)+self.__bd.get(j+1,i)+self.__bd.get(j+2,i)+self.__bd.get(j+3,i)+self.__bd.get(j+4,i)
                     if (check == (5 * self.__bd.get(j,i))):
                         return True            
-            
+        
          
         #  diagonal 1        
         for i  in range(0, self.__size-4):
@@ -153,9 +147,12 @@ class omokgame:
             self.__draw=0
             return False
         
+
+
     def validCheck(self, stn):
         # 3 by3 check =>  not implemented
         # overlapped check
         if (self.__bd.get(stn.getX(), stn.getY()) !=0):
             return False
         return True
+    

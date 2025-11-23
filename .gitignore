@@ -1,3 +1,6 @@
 __pycache__
+test
 .vscode
 .idea
+examples.pkl
+az_net.pt
