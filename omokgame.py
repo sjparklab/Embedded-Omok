@@ -49,7 +49,7 @@ class omokgame:
                     end = time.time()
                     time_delay = end - start   # exec_time= next() method
                     time_b +=1 
-                    if ((time_b >= 4) or (self.validCheck(stn_b) and (time_delay < 100)) ): # person: time_delay=100 
+                    if ((time_b >= 4) or (self.validCheck(stn_b) and (time_delay < 5)) ): # person: time_delay=100 
                         break
                 if (time_b < 4) :
                     self.__bd.update(stn_b)

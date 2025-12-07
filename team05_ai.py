@@ -1,386 +1,491 @@
-import random
+# -*- coding: utf-8 -*-
+"""
+team05_ai.py - 개선된 오목 AI 엔진
+주요 개선:
+1. Transposition Table (중복 계산 방지)
+2. 더 정교한 패턴 평가 (띈 3, 44, 33)
+3. Killer Move Heuristic
+4. Iterative Deepening
+"""
 
-# Constants for board dimensions
-BOARD_SIZE = 19
-TOTAL_CELLS = BOARD_SIZE * BOARD_SIZE  # 361
+import copy
+from random import choice
 
-# Precompute masks for preventing bitboard wrap-around
-# These masks ensure that a 5-stone pattern does not cross board edges when shifted.
-
-# HORIZONTAL_MASK: Only allows patterns starting in columns 0-14.
-HORZ_MASK = 0
-for r in range(BOARD_SIZE):
-    for c in range(BOARD_SIZE - 4): # Columns 0 to 14
-        HORZ_MASK |= (1 << (r * BOARD_SIZE + c))
-
-# VERTICAL_MASK: Only allows patterns starting in rows 0-14.
-VERT_MASK = 0
-for r in range(BOARD_SIZE - 4): # Rows 0 to 14
-    for c in range(BOARD_SIZE):
-        VERT_MASK |= (1 << (r * BOARD_SIZE + c))
-
-# DIAG1_MASK (\ diagonal): Only allows patterns starting in rows 0-14 AND columns 0-14.
-DIAG1_MASK = 0
-for r in range(BOARD_SIZE - 4): # Rows 0 to 14
-    for c in range(BOARD_SIZE - 4): # Columns 0 to 14
-        DIAG1_MASK |= (1 << (r * BOARD_SIZE + c))
-
-# DIAG2_MASK (/ diagonal): Only allows patterns starting in rows 0-14 AND columns 4-18.
-DIAG2_MASK = 0
-for r in range(BOARD_SIZE - 4): # Rows 0 to 14
-    for c in range(4, BOARD_SIZE): # Columns 4 to 18
-        DIAG2_MASK |= (1 << (r * BOARD_SIZE + c))
-
-# Combine with directions for easier iteration
-DIRECTION_MASKS = {
-    1: HORZ_MASK,    # Horizontal
-    19: VERT_MASK,   # Vertical
-    18: DIAG1_MASK,  # Diagonal \
-    20: DIAG2_MASK   # Diagonal /
-}
-
-# Masks for single columns/rows to prevent wrap-around for occupied shifts
-COL_0_MASK = 0 # All bits in column 0
-COL_18_MASK = 0 # All bits in column 18
-ROW_0_MASK = 0 # All bits in row 0
-ROW_18_MASK = 0 # All bits in row 18
-
-for r in range(BOARD_SIZE):
-    COL_0_MASK |= (1 << (r * BOARD_SIZE + 0))
-    COL_18_MASK |= (1 << (r * BOARD_SIZE + 18))
-for c in range(BOARD_SIZE):
-    ROW_0_MASK |= (1 << (0 * BOARD_SIZE + c))
-    ROW_18_MASK |= (1 << (18 * BOARD_SIZE + c))
+INF = 10**9
 
 
-# =============================================================================
-# GomokuEngine (패턴 매칭 기반 AI)
-# =============================================================================
 class GomokuEngine:
     def __init__(self):
-        # 더 이상 가중치 파일 로딩이 필요 없습니다!
-        pass
-
-    def parse_board_to_bitboard(self, board, my_color):
-        """2차원 배열을 비트보드로 변환"""
-        my_bb = 0
-        opp_bb = 0
-        for r in range(19):
-            for c in range(19):
-                stone = board[r][c]
-                if stone == 0: continue
-                idx = r * 19 + c
-                if stone == my_color:
-                    my_bb |= (1 << idx)
-                else:
-                    opp_bb |= (1 << idx)
-        return my_bb, opp_bb
-
-    def is_win(self, board):
-        """5목 승리 판정 (4방향 체크)"""
+        # Transposition Table
+        self.tt = {}
+        self.tt_hits = 0
         
-        # Horizontal (d=1)
-        b_masked = board & DIRECTION_MASKS[1]
-        two = b_masked & (b_masked >> 1)
-        three = two & (b_masked >> 2)
-        four = three & (b_masked >> 3)
-        if four & (b_masked >> 4):
-            return True
-
-        # Vertical (d=19)
-        b_masked = board & DIRECTION_MASKS[19]
-        two = b_masked & (b_masked >> 19)
-        three = two & (b_masked >> 38)
-        four = three & (b_masked >> 57)
-        if four & (b_masked >> 76):
-            return True
-
-        # Diagonal \ (d=18)
-        b_masked = board & DIRECTION_MASKS[18]
-        two = b_masked & (b_masked >> 18)
-        three = two & (b_masked >> 36)
-        four = three & (b_masked >> 54)
-        if four & (b_masked >> 72):
-            return True
-
-        # Diagonal / (d=20)
-        b_masked = board & DIRECTION_MASKS[20]
-        two = b_masked & (b_masked >> 20)
-        three = two & (b_masked >> 40)
-        four = three & (b_masked >> 60)
-        if four & (b_masked >> 80):
-            return True
-
+        # Killer Moves (좋았던 수 기억)
+        self.killer_moves = {}
+    
+    def clear_cache(self):
+        """캐시 초기화"""
+        self.tt.clear()
+        self.killer_moves.clear()
+    
+    # =========================================================================
+    # 기본 유틸리티
+    # =========================================================================
+    
+    def board_hash(self, board):
+        """보드 상태를 해시로 변환 (Transposition Table용)"""
+        return tuple(tuple(row) for row in board)
+    
+    def is_five(self, board, x, y, color, length=19):
+        """5목 여부 검사"""
+        directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
+        for dx, dy in directions:
+            count = 1
+            
+            i, j = x + dx, y + dy
+            while 0 <= i < length and 0 <= j < length and board[i][j] == color:
+                count += 1
+                i += dx
+                j += dy
+            
+            i, j = x - dx, y - dy
+            while 0 <= i < length and 0 <= j < length and board[i][j] == color:
+                count += 1
+                i -= dx
+                j -= dy
+            
+            if count >= 5:
+                return True
         return False
-
-    def evaluate(self, my_board, opp_board):
+    
+    def analyze_line(self, board, x, y, color, dx, dy, length=19):
         """
-        패턴 매칭을 통한 형세 판단
-        (NNUE 대신 우리가 정한 점수표를 사용합니다)
+        한 방향 라인 분석 - 더 정교한 패턴 감지
+        Returns: (연속 개수, 열린 끝 수, 빈칸 포함 패턴 길이)
         """
+        count = 1
+        open_ends = 0
+        gaps = 0  # 띈 3 감지용
+        pattern_length = 1
+        
+        # 정방향
+        i, j = x + dx, y + dy
+        gap_found = False
+        while 0 <= i < length and 0 <= j < length:
+            if board[i][j] == color:
+                count += 1
+                pattern_length += 1
+            elif board[i][j] == 0 and not gap_found:
+                # 한 칸 띈 패턴 체크
+                ni, nj = i + dx, j + dy
+                if 0 <= ni < length and 0 <= nj < length and board[ni][nj] == color:
+                    gaps += 1
+                    gap_found = True
+                    pattern_length += 1
+                    i, j = ni, nj
+                    continue
+                else:
+                    open_ends += 1
+                    break
+            else:
+                break
+            i += dx
+            j += dy
+        
+        # 역방향
+        i, j = x - dx, y - dy
+        gap_found = False
+        while 0 <= i < length and 0 <= j < length:
+            if board[i][j] == color:
+                count += 1
+                pattern_length += 1
+            elif board[i][j] == 0 and not gap_found:
+                ni, nj = i - dx, j - dy
+                if 0 <= ni < length and 0 <= nj < length and board[ni][nj] == color:
+                    gaps += 1
+                    gap_found = True
+                    pattern_length += 1
+                    i, j = ni, nj
+                    continue
+                else:
+                    open_ends += 1
+                    break
+            else:
+                break
+            i -= dx
+            j -= dy
+        
+        return count, open_ends, gaps, pattern_length
+    
+    def score_direction(self, board, x, y, color, dx, dy, length=19):
+        """개선된 방향별 점수 계산"""
+        count, open_ends, gaps, pattern_len = self.analyze_line(board, x, y, color, dx, dy, length)
+        
+        # 5목
+        if count >= 5:
+            return 100000
+        
+        # 4목 패턴
+        if count == 4:
+            if open_ends == 2:
+                return 50000   # 열린 4 = 승리
+            elif open_ends == 1:
+                return 5000    # 막힌 4
+            else:
+                return 500     # 양쪽 막힘
+        
+        # 띈 4 (X.XXX 또는 XX.XX)
+        if count == 4 and gaps > 0:
+            return 4000
+        
+        # 3목 패턴
+        if count == 3:
+            if open_ends == 2:
+                return 3000    # 열린 3
+            elif open_ends == 1:
+                return 500     # 막힌 3
+            else:
+                return 50
+        
+        # 띈 3 (X.XX 또는 XX.X)
+        if count == 3 and gaps > 0 and open_ends >= 1:
+            return 1500  # 띈 열린 3
+        
+        # 2목 패턴
+        if count == 2:
+            if open_ends == 2:
+                return 200     # 열린 2
+            elif open_ends == 1:
+                return 50      # 막힌 2
+        
+        return count * 5
+    
+    def score_move(self, board, x, y, color, length=19):
+        """단일 수 점수"""
+        directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
         score = 0
-        occupied = my_board | opp_board
         
-        # [점수표]
-        SCORES = {
-            'open_4': 10000,  # 승리 확정
-            'open_3': 3000,   # 강력한 공격
-            'closed_4': 1000, # 강제수 (상대 방어 유도)
-            'closed_3': 100   # 견제
-        }
+        # 각 방향 점수 합산
+        direction_scores = []
+        for dx, dy in directions:
+            ds = self.score_direction(board, x, y, color, dx, dy, length)
+            direction_scores.append(ds)
+            score += ds
         
-        directions = [1, 19, 18, 20]
+        # 44 패턴 (두 개의 4가 교차) - 승리 확정
+        fours = sum(1 for s in direction_scores if s >= 4000)
+        if fours >= 2:
+            score += 40000
         
-        for d in directions:
-            mask = DIRECTION_MASKS[d]
-            # --- 1. 내 돌 패턴 찾기 ---
-            b_masked = my_board & mask
-            two = b_masked & (b_masked >> d)
-            three = two & (b_masked >> (2 * d))
-            four = three & (b_masked >> (3 * d))
-            
-            # A. 열린 4 / 닫힌 4 구분
-            # four는 현재 4개가 연속된 상태.
-            # Determine valid positions for checking empty spots for a 4-stone pattern
-            # left_empty checks position `pos - d`
-            # right_empty checks position `pos + 4d`
-
-            # Calculate actual bits for left/right empty, respecting boundaries
-            # Temporary occupied for checking 'left' empty (position `pos - d`)
-            temp_occ_left_4 = occupied << d
-            if d == 1: # Horizontal
-                temp_occ_left_4 &= ~COL_0_MASK
-            elif d == 18: # Diagonal \
-                temp_occ_left_4 &= ~(COL_0_MASK | ROW_0_MASK)
-            elif d == 19: # Vertical
-                temp_occ_left_4 &= ~ROW_0_MASK
-            elif d == 20: # Diagonal /
-                temp_occ_left_4 &= ~(COL_18_MASK | ROW_0_MASK)
-
-            # Temporary occupied for checking 'right' empty (position `pos + 4d`)
-            temp_occ_right_4 = occupied >> (4 * d)
-            if d == 1: # Horizontal
-                temp_occ_right_4 &= ~COL_18_MASK
-            elif d == 18: # Diagonal \
-                temp_occ_right_4 &= ~(COL_18_MASK | ROW_18_MASK)
-            elif d == 19: # Vertical
-                temp_occ_right_4 &= ~ROW_18_MASK
-            elif d == 20: # Diagonal /
-                temp_occ_right_4 &= ~(COL_0_MASK | ROW_18_MASK)
-
-            left_empty_for_four = (~temp_occ_left_4)
-            right_empty_for_four = (~temp_occ_right_4)
-            
-            valid_open_4 = four & left_empty_for_four & right_empty_for_four
-            valid_closed_4 = four & (left_empty_for_four | right_empty_for_four) # at least one side open
-            valid_closed_4 &= (~valid_open_4) # Remove those that are fully open, to count only partially open
-
-            score += bin(valid_open_4).count('1') * SCORES['open_4']
-            score += bin(valid_closed_4).count('1') * SCORES['closed_4']
-            
-            # B. 열린 3 ( . ● ● ● . )
-            # 3개 연속(three) 이면서 양쪽이 비어있어야 함
-            # Determine valid positions for checking empty spots for a 3-stone pattern
-            # left_empty checks position `pos - d`
-            # right_empty checks position `pos + 3d`
-
-            temp_occ_left_3 = occupied << d
-            if d == 1: # Horizontal
-                temp_occ_left_3 &= ~COL_0_MASK
-            elif d == 18: # Diagonal \
-                temp_occ_left_3 &= ~(COL_0_MASK | ROW_0_MASK)
-            elif d == 19: # Vertical
-                temp_occ_left_3 &= ~ROW_0_MASK
-            elif d == 20: # Diagonal /
-                temp_occ_left_3 &= ~(COL_18_MASK | ROW_0_MASK)
-
-            temp_occ_right_3 = occupied >> (3 * d)
-            if d == 1: # Horizontal
-                temp_occ_right_3 &= ~COL_18_MASK
-            elif d == 18: # Diagonal \
-                temp_occ_right_3 &= ~(COL_18_MASK | ROW_18_MASK)
-            elif d == 19: # Vertical
-                temp_occ_right_3 &= ~ROW_18_MASK
-            elif d == 20: # Diagonal /
-                temp_occ_right_3 &= ~(COL_0_MASK | ROW_18_MASK)
-
-            left_empty_for_three = (~temp_occ_left_3)
-            right_empty_for_three = (~temp_occ_right_3)
-
-            valid_open_3 = three & left_empty_for_three & right_empty_for_three
-            score += bin(valid_open_3).count('1') * SCORES['open_3']
-
+        # 33 패턴 (두 개의 열린 3이 교차) - 매우 강력
+        threes = sum(1 for s in direction_scores if 2500 <= s <= 3500)
+        if threes >= 2:
+            score += 8000
+        
+        # 43 패턴 (4와 열린 3)
+        if fours >= 1 and threes >= 1:
+            score += 15000
+        
         return score
-
-    def get_heuristic_score(self, my_board, opp_board):
-        # 내 공격 점수 - 상대 공격 점수 (방어)
-        return self.evaluate(my_board, opp_board) - self.evaluate(opp_board, my_board) * 1.5
-        # *1.5를 하는 이유: 내 공격보다 수비(상대 공격 막기)를 더 우선시하도록!
-
-    def generate_moves(self, my_board, opp_board):
-        """후보 수 생성 (주변 1칸)"""
-        occupied = my_board | opp_board
-        if occupied == 0: return [180] # 중앙(9,9)
+    
+    def evaluate_move(self, board, x, y, my_color, opp_color, length=19):
+        """공격 + 방어 점수"""
+        original = board[x][y]
         
-        # 8방향 확장 (Dilation)
-        empty = ~occupied & ((1 << 361) - 1)
-        dirs = [1, 19, 18, 20]
-        neighbor_mask = 0
-        for d in dirs:
-            neighbor_mask |= (occupied << d)
-            neighbor_mask |= (occupied >> d)
-        neighbor_mask &= ((1 << 361) - 1)
+        board[x][y] = my_color
+        my_score = self.score_move(board, x, y, my_color, length)
+        board[x][y] = original
         
-        candidates_bb = neighbor_mask & empty
+        board[x][y] = opp_color
+        opp_score = self.score_move(board, x, y, opp_color, length)
+        board[x][y] = original
         
-        moves = []
-        while candidates_bb:
-            lsb = candidates_bb & -candidates_bb
-            moves.append(lsb.bit_length() - 1)
-            candidates_bb ^= lsb
-        return moves
-
-    def alpha_beta(self, depth, alpha, beta, my_board, opp_board):
-        # 1. 상대 승리 확인 (내가 짐)
-        if self.is_win(opp_board): return -50000
-            
-        # 2. 깊이 제한 -> 패턴 매칭 점수 반환
-        if depth == 0:
-            return self.get_heuristic_score(my_board, opp_board)
-            
-        moves = self.generate_moves(my_board, opp_board)
-        
-        # 간단한 정렬 (중앙에 가까울수록 가점 주는 등)은 생략되었으나,
-        # 여기서 evaluate 함수를 이용해 정렬하면 훨씬 빨라집니다.
-        
-        for move_idx in moves:
-            move_mask = (1 << move_idx)
-            new_my_board = my_board | move_mask
-            
-            # 재귀 호출
-            score = -self.alpha_beta(depth - 1, -beta, -alpha, opp_board, new_my_board)
-            
-            if score >= beta: return beta
-            if score > alpha: alpha = score
-                
-        return alpha
-
-    def search_root(self, my_bb, opp_bb):
-        moves = self.generate_moves(my_bb, opp_bb)
-        
-        best_move = -1
-        alpha = -9999999
-        beta = 9999999
-        depth = 5 # 속도에 따라 3~4로 늘려보세요!
-        
-        # Move Ordering을 위해 점수 미리 계산해보기 (선택 사항)
-        # moves.sort(key=lambda m: ...) 
-        
-        for move_idx in moves:
-            move_mask = (1 << move_idx)
-            new_my_bb = my_bb | move_mask
-            
-            score = -self.alpha_beta(depth - 1, -beta, -alpha, opp_bb, new_my_bb)
-            
-            if score > alpha:
-                alpha = score
-                best_move = move_idx
-                
-        return best_move
-
-    def get_best_move(self, board, my_color):
-        """외부(Player)에서 호출하는 인터페이스"""
-        # 1. 입력 변환
-        my_bb, opp_bb = self.parse_board_to_bitboard(board, my_color)
-        
-        # ---------------------------------------------------------------------
-        # [★ 중요] VCF 승리 탐색 (필살기)
-        # 15수 정도 깊이로 "연속 공격 승리"가 있는지 먼저 봅니다.
-        # ---------------------------------------------------------------------
-        vcf_move = self.solve_vcf(my_bb, opp_bb, depth=15)
-        if vcf_move != -1:
-            return vcf_move // 19, vcf_move % 19
-            
-        # ---------------------------------------------------------------------
-        # [방어] 상대방의 VCF 공격 막기
-        # (상대 입장에서 VCF가 되는지 보고, 된다면 그 첫 수를 내가 막아야 함)
-        # ---------------------------------------------------------------------
-        threat_move = self.solve_vcf(opp_bb, my_bb, depth=7) # 방어는 좀 얕게
-        if threat_move != -1:
-            return threat_move // 19, threat_move % 19
-
-        # 2. 일반 탐색 (Alpha-Beta)
-        # VCF가 없으면 원래대로 차분하게 탐색
-        best_move_index = self.search_root(my_bb, opp_bb)
-        
-        # 3. 출력 변환
-        if best_move_index == -1:
-            return 9, 9
-            
-        return best_move_index // 19, best_move_index % 19
+        # 공격을 더 중시 (선공 이점)
+        return my_score * 1.3 + opp_score * 1.1
+    
+    def evaluate_board(self, board, my_color, opp_color, length=19):
+        """보드 전체 평가"""
+        total = 0
+        for x in range(length):
+            for y in range(length):
+                if board[x][y] == my_color:
+                    total += self.score_move(board, x, y, my_color, length)
+                elif board[x][y] == opp_color:
+                    total -= self.score_move(board, x, y, opp_color, length)
+        return total
     
     # =========================================================================
-    # [추가] VCF (Victory by Continuous Four) 로직
+    # 후보 수 생성
     # =========================================================================
     
-    def get_winning_spot(self, board):
-        """
-        현재 board에 '4목'이 있어서, 다음 수에 5목이 되는 자리(급소)를 하나 찾아서 반환.
-        (상대방이 4를 쳤을 때 막아야 할 자리를 찾을 때 사용)
-        """
-        # 모든 빈칸을 다 뒤지는 건 느리니, 돌 주변만 검사
-        # (더 빠르게 하려면 비트 연산으로 4목 패턴을 찾아야 하지만, 
-        #  코드 복잡도를 줄이기 위해 시뮬레이션 방식을 씁니다.)
-        candidates = self.generate_moves(board, 0) # 상대 돌은 0으로 처리(내 돌 기준)
+    def has_any_stone(self, board, length=19):
+        for i in range(length):
+            for j in range(length):
+                if board[i][j] != 0:
+                    return True
+        return False
+    
+    def get_bounding_box(self, board, length=19):
+        min_x, max_x = length, -1
+        min_y, max_y = length, -1
+        for x in range(length):
+            for y in range(length):
+                if board[x][y] != 0:
+                    min_x = min(min_x, x)
+                    max_x = max(max_x, x)
+                    min_y = min(min_y, y)
+                    max_y = max(max_y, y)
+        if max_x == -1:
+            return None
+        return (min_x, max_x, min_y, max_y)
+    
+    def generate_candidate_moves(self, board, my_color, opp_color, length=19, max_candidates=20):
+        """휴리스틱 기반 후보 수 생성"""
+        if not self.has_any_stone(board, length):
+            c = length // 2
+            return [(c, c)]
         
-        for move in candidates:
-            # 이 자리에 뒀을 때 5목이 되는가?
-            if self.is_win(board | (1 << move)):
-                return move
-        return -1
-
-    def solve_vcf(self, my_bb, opp_bb, depth, path=[]):
-        """
-        VCF 탐색: 연속으로 4를 둬서 이기는 길이 있는지 찾는다.
-        :return: 이기는 첫 번째 수의 인덱스 (없으면 -1)
-        """
-        if depth == 0: return -1
+        bbox = self.get_bounding_box(board, length)
+        if bbox is None:
+            c = length // 2
+            return [(c, c)]
         
-        # 1. 나의 후보 수 생성 (주변 빈칸들)
-        moves = self.generate_moves(my_bb, opp_bb)
+        min_x, max_x, min_y, max_y = bbox
+        margin = 2
+        sx = max(0, min_x - margin)
+        ex = min(length - 1, max_x + margin)
+        sy = max(0, min_y - margin)
+        ey = min(length - 1, max_y + margin)
         
-        for move in moves:
-            move_mask = (1 << move)
-            
-            # [시뮬레이션] 내가 둠
-            next_my_bb = my_bb | move_mask
-            
-            # A. 바로 승리 (5목) -> 찾았다!
-            if self.is_win(next_my_bb):
-                return move
-            
-            # B. 4목(공격)인지 확인
-            # 상대방 입장에서 봤을 때 "막아야 할 자리"가 생겼는지 확인
-            # 내가 뒀으니(next_my_bb), 이 돌들이 만드는 위협(급소)을 찾음
-            defense_point = self.get_winning_spot(next_my_bb)
-            
-            if defense_point != -1:
-                # 상대는 무조건 defense_point를 막아야 함 (강제수)
-                # 만약 defense_point가 이미 내 돌이나 상대 돌로 차있다면? (그럴 리 없지만)
-                # 문제는, 4-3 같은 게 터져서 급소가 2개 이상이면? -> 그건 '열린 4'이므로 이미 승리!
+        candidates = []
+        for x in range(sx, ex + 1):
+            for y in range(sy, ey + 1):
+                if board[x][y] != 0:
+                    continue
+                score = self.evaluate_move(board, x, y, my_color, opp_color, length)
                 
-                # 열린 4 체크: 급소가 2개 이상이면 무조건 승리
-                # (간단히 하기 위해: 내가 뒀는데 급소가 생겼다면 공격 성공으로 간주하고 진행)
+                # Killer Move 보너스
+                if (x, y) in self.killer_moves:
+                    score += self.killer_moves[(x, y)] * 100
                 
-                # 상대가 막음 (강제 방어)
-                next_opp_bb = opp_bb | (1 << defense_point)
-                
-                # [재귀 호출] 계속 공격!
-                # 상대가 막은 상태에서 다시 VCF를 찾음
-                res = self.solve_vcf(next_my_bb, next_opp_bb, depth - 1, path + [move])
-                
-                if res != -1:
-                    # 재귀에서 승리 길을 찾았다면, 지금 둔 수(move)가 정답!
-                    return move
+                candidates.append((score, x, y))
+        
+        if not candidates:
+            empty = [(i, j) for i in range(length) for j in range(length) if board[i][j] == 0]
+            if not empty:
+                return []
+            return [choice(empty)]
+        
+        candidates.sort(reverse=True, key=lambda t: t[0])
+        return [(x, y) for _, x, y in candidates[:max_candidates]]
+    
+    # =========================================================================
+    # 즉시 위협 탐지
+    # =========================================================================
+    
+    def find_winning_move(self, board, color, length=19):
+        """즉시 5목이 되는 수 찾기"""
+        for x in range(length):
+            for y in range(length):
+                if board[x][y] == 0:
+                    board[x][y] = color
+                    if self.is_five(board, x, y, color, length):
+                        board[x][y] = 0
+                        return (x, y)
+                    board[x][y] = 0
+        return None
+    
+    def find_double_threat_move(self, board, color, opp_color, length=19):
+        """44, 43, 33 같은 다중 위협 찾기"""
+        for x in range(length):
+            for y in range(length):
+                if board[x][y] == 0:
+                    board[x][y] = color
+                    score = self.score_move(board, x, y, color, length)
+                    board[x][y] = 0
                     
-        return -1
+                    # 44 또는 43이면 승리 확정
+                    if score >= 40000:
+                        return (x, y)
+        return None
+    
+    def count_winning_spots(self, board, color, length=19):
+        """5목이 되는 빈칸 개수"""
+        count = 0
+        for x in range(length):
+            for y in range(length):
+                if board[x][y] == 0:
+                    board[x][y] = color
+                    if self.is_five(board, x, y, color, length):
+                        count += 1
+                    board[x][y] = 0
+        return count
+    
+    # =========================================================================
+    # Minimax + Alpha-Beta + Transposition Table
+    # =========================================================================
+    
+    def minimax(self, board, depth, alpha, beta, maximizing, my_color, opp_color, length, last_move=None):
+        # Transposition Table 체크
+        board_key = (self.board_hash(board), depth, maximizing)
+        if board_key in self.tt:
+            self.tt_hits += 1
+            return self.tt[board_key]
+        
+        # 승리 체크
+        if last_move is not None:
+            lx, ly = last_move
+            last_color = board[lx][ly]
+            if self.is_five(board, lx, ly, last_color, length):
+                score = 1000000 + depth if last_color == my_color else -1000000 - depth
+                return score
+        
+        # 깊이 제한
+        if depth == 0:
+            return self.evaluate_board(board, my_color, opp_color, length)
+        
+        current_color = my_color if maximizing else opp_color
+        
+        # 즉시 승리 체크
+        win_move = self.find_winning_move(board, current_color, length)
+        if win_move:
+            return 1000000 + depth if maximizing else -1000000 - depth
+        
+        # 즉시 방어 필요 체크
+        threat_color = opp_color if maximizing else my_color
+        block_move = self.find_winning_move(board, threat_color, length)
+        if block_move:
+            x, y = block_move
+            board[x][y] = current_color
+            score = self.minimax(board, depth - 1, alpha, beta, not maximizing, my_color, opp_color, length, (x, y))
+            board[x][y] = 0
+            self.tt[board_key] = score
+            return score
+        
+        if maximizing:
+            value = -INF
+            moves = self.generate_candidate_moves(board, my_color, opp_color, length, max_candidates=15)
+            if not moves:
+                return self.evaluate_board(board, my_color, opp_color, length)
+            
+            best_move = None
+            for x, y in moves:
+                board[x][y] = my_color
+                score = self.minimax(board, depth - 1, alpha, beta, False, my_color, opp_color, length, (x, y))
+                board[x][y] = 0
+                
+                if score > value:
+                    value = score
+                    best_move = (x, y)
+                alpha = max(alpha, value)
+                if alpha >= beta:
+                    # Killer Move 기록
+                    if best_move:
+                        self.killer_moves[best_move] = self.killer_moves.get(best_move, 0) + 1
+                    break
+            
+            self.tt[board_key] = value
+            return value
+        else:
+            value = INF
+            moves = self.generate_candidate_moves(board, opp_color, my_color, length, max_candidates=15)
+            if not moves:
+                return self.evaluate_board(board, my_color, opp_color, length)
+            
+            for x, y in moves:
+                board[x][y] = opp_color
+                score = self.minimax(board, depth - 1, alpha, beta, True, my_color, opp_color, length, (x, y))
+                board[x][y] = 0
+                
+                value = min(value, score)
+                beta = min(beta, value)
+                if alpha >= beta:
+                    break
+            
+            self.tt[board_key] = value
+            return value
+    
+    # =========================================================================
+    # Iterative Deepening
+    # =========================================================================
+    
+    def iterative_deepening_search(self, board, my_color, opp_color, length, max_depth=4):
+        """점진적 깊이 탐색"""
+        best_move = None
+        best_score = -INF
+        
+        root_moves = self.generate_candidate_moves(board, my_color, opp_color, length, max_candidates=20)
+        
+        if not root_moves:
+            return length // 2, length // 2
+        
+        # 깊이 1부터 max_depth까지 점진적 탐색
+        for depth in range(1, max_depth + 1):
+            current_best_move = None
+            current_best_score = -INF
+            
+            # 이전 탐색 결과로 Move Ordering
+            scored_moves = []
+            for x, y in root_moves:
+                board[x][y] = my_color
+                score = self.minimax(board, depth - 1, -INF, INF, False, my_color, opp_color, length, (x, y))
+                board[x][y] = 0
+                scored_moves.append((score, x, y))
+                
+                if score > current_best_score:
+                    current_best_score = score
+                    current_best_move = (x, y)
+            
+            # 다음 반복을 위해 정렬
+            scored_moves.sort(reverse=True, key=lambda t: t[0])
+            root_moves = [(x, y) for _, x, y in scored_moves]
+            
+            best_move = current_best_move
+            best_score = current_best_score
+            
+            # 승리 확정이면 조기 종료
+            if best_score >= 900000:
+                break
+        
+        return best_move if best_move else (length // 2, length // 2)
+    
+    # =========================================================================
+    # 메인 인터페이스
+    # =========================================================================
+    
+    def get_best_move(self, board, my_color):
+        """최선의 수 반환"""
+        length = len(board)
+        opp_color = -my_color
+        
+        # 캐시 제한 (메모리 관리)
+        if len(self.tt) > 100000:
+            self.tt.clear()
+        
+        # 1. 돌이 없으면 중앙
+        if not self.has_any_stone(board, length):
+            c = length // 2
+            return c, c
+        
+        # 2. 즉시 승리 체크
+        win_move = self.find_winning_move(board, my_color, length)
+        if win_move:
+            return win_move
+        
+        # 3. 즉시 방어 체크
+        block_move = self.find_winning_move(board, opp_color, length)
+        if block_move:
+            return block_move
+        
+        # 4. 다중 위협 (44, 43) 체크
+        double_threat = self.find_double_threat_move(board, my_color, opp_color, length)
+        if double_threat:
+            return double_threat
+        
+        # 5. 상대 다중 위협 방어
+        opp_double_threat = self.find_double_threat_move(board, opp_color, my_color, length)
+        if opp_double_threat:
+            return opp_double_threat
+        
+        # 6. Iterative Deepening Search
+        return self.iterative_deepening_search(board, my_color, opp_color, length, max_depth=4)
