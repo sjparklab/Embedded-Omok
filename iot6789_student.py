@@ -11,7 +11,7 @@ Maker : bychoi@deu.ac.kr
 from player import *
 from stone import *
 # ★ 우리가 만든 핵심 AI 파일 임포트
-from team05_ai import GomokuEngine
+from team05_sjpark import GomokuEngine
 
 class iot6789_student(player):
     def __init__(self, clr):
