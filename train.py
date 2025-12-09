@@ -1,3 +1,4 @@
+# train.py
 # 수집된 examples.pkl 로 네트워크 학습 (간단한 학습 루프)
 import torch
 import torch.nn.functional as F
@@ -16,7 +17,7 @@ class AZDataset(Dataset):
         s, pi, z = self.examples[idx]
         return torch.from_numpy(s).float(), torch.from_numpy(pi).float(), torch.tensor(z).float()
 
-def train(examples_path="examples.pkl", model_out="az_net.pt", epochs=8, batch_size=48, lr=1e-3, device='cpu', board_size=19):
+def train(examples_path="examples.pkl", model_out="az_net.pt", epochs=5, batch_size=64, lr=1e-3, device='cpu', board_size=19):
     with open(examples_path, "rb") as f:
         examples = pickle.load(f)
     if len(examples) == 0:
@@ -52,4 +53,4 @@ def train(examples_path="examples.pkl", model_out="az_net.pt", epochs=8, batch_s
     print(f"Model saved to {model_out}")
 
 if __name__ == "__main__":
-    train(examples_path="examples.pkl", model_out="az_net.pt", epochs=5, batch_size=48, lr=1e-3, device='cpu')
+    train(examples_path="examples.pkl", model_out="az_net.pt", epochs=3, batch_size=64, lr=1e-3, device='cpu')

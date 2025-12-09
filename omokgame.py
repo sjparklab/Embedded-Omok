@@ -12,10 +12,10 @@ from player import *
 from iot6789_student import *
 from stone import *
 # 기존: from iot12345_student import *
-# 변경: AlphaZero 스타일 플레이어를 사용하도록 iot12345_az
+# 변경: AlphaZero 스타일 플레이어를 사용하도록 iot12345_az를 불러옵니다.
 from iot12345_az import *
 # from iot12345_student import *
-# from iot6789_student import *
+#from iot6789_student import *
 import time  # append by bychoi
 
 
@@ -26,9 +26,9 @@ class omokgame:
         #self.__black = player(-1)
         self.__black = iot6789_student(-1)
         # 기존: self.__white = iot12345_student(1)
-        # 변경: 기본 White 플레이어를 AlphaZero 스타일 구현(iot12345_az)로 설정
-        # model_path는 None으로 두면 모델 파일이 없어도 동작
-        self.__white = iot12345_az(1, model_path='az_net.pt', board_size=self.__size, device='cpu', n_sim=200)
+        # 변경: 기본 White 플레이어를 AlphaZero 스타일 구현(iot12345_az)로 설정.
+        # model_path는 None으로 두어 모델 파일이 없어도 동작하도록 합니다.
+        self.__white = iot12345_az(1, model_path='checkpoints\\supervised_pretrain.pt', board_size=self.__size, device='cpu', n_sim=200)
         self.__turns=0
         self.__next= -1
         self.__draw = 0

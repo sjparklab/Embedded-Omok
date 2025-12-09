@@ -4,3 +4,12 @@ test
 .idea
 examples.pkl
 az_net.pt
+venv
+logs
+examples
+checkpoints
+checkpoints_finetune
+examples_pretrain
+evaluate.py
+examples_ab.pkl
+examples_pretrain_merged.pkl

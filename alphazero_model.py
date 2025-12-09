@@ -1,3 +1,5 @@
+# alphazero_model.py
+# 경량 Policy+Value 신경망 (PyTorch) — 기본 board_size=19
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

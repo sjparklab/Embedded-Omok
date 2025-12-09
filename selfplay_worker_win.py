@@ -1,43 +1,36 @@
-# selfplay.py
-# 자기대국으로 (state, pi, z) 수집 — 19x19, renju 규칙 없음
-import numpy as np
+# selfplay_worker_win.py
+# Windows-friendly self-play worker.
+# Each worker creates its own inference server (via MCTS use_infer_server=True)
+import argparse
+import os
 import pickle
 from tqdm import trange
+import numpy as np
 import torch
 from alphazero_model import AlphaZeroNet
 from mcts import MCTS, is_five
 
 def augment_example(state_planes, pi):
-    """데이터 증강: 모든 8개의 대칭(회전+대칭) 적용해 반환 리스트."""
-    # state_planes: (2,H,W), pi: flat (H*W)
     H = state_planes.shape[1]
     examples = []
     p_board = pi.reshape((H,H))
     for k in range(4):
-        # rotate k*90
         sp = np.rot90(state_planes, k, axes=(1,2))
         pp = np.rot90(p_board, k)
         examples.append((sp.copy(), pp.copy().flatten()))
-        # reflect horizontally (flip columns)
         spf = np.flip(sp, axis=2)
         ppf = np.flip(pp, axis=1)
         examples.append((spf.copy(), ppf.copy().flatten()))
     return examples
 
-def play_game(net, board_size=19, n_sim=200, temp_threshold=30, device='cpu'):
-    """
-    Play one self-play game using MCTS guided by net.
-    Returns list of training examples: (state_planes, pi, z)
-    state_planes: (2, H, W) np.float32 (canonicalized w.r.t. player to move)
-    pi: flat prob vector length H*W (np.float32)
-    z: final outcome from current player's perspective (float: 1/-1/0)
-    """
+def play_game(net, board_size=19, n_sim=200, temp_threshold=30, device='cuda:0'):
     net.eval()
-    mcts = MCTS(net, board_size=board_size, c_puct=1.0, n_sim=n_sim, device=device, max_candidates=200)
+    # NOTE: enable use_infer_server -> MCTS will spawn a local inference server (child process)
+    mcts = MCTS(net, board_size=board_size, c_puct=1.0, n_sim=n_sim, device=device,
+                max_candidates=200, use_infer_server=True, infer_batch_size=64, infer_device=device)
     board = np.zeros((board_size, board_size), dtype=int)
-    to_move = 1  # white first in this repo convention; adjust if needed
+    to_move = 1
     history = []
-
     for move in range(board_size * board_size):
         temp = 1.0 if move < temp_threshold else 1e-3
         probs = mcts.get_action_probs(board.copy(), to_move, temp=temp)
@@ -56,30 +49,46 @@ def play_game(net, board_size=19, n_sim=200, temp_threshold=30, device='cpu'):
             examples = []
             for (s, pi, player) in history:
                 z = 1.0 if player == winner else -1.0
-                # augmentation
-                augmented = augment_example(s, pi)
-                for (as_p, api) in augmented:
+                for (as_p, api) in augment_example(s, pi):
                     examples.append((as_p.astype(np.float32), api.astype(np.float32), float(z)))
+            # clean up MCTS (stop infer server)
+            try:
+                mcts.close()
+            except Exception:
+                pass
             return examples
         to_move = -to_move
-
+    # draw
     examples = []
     for (s, pi, player) in history:
         for (as_p, api) in augment_example(s, pi):
             examples.append((as_p.astype(np.float32), api.astype(np.float32), 0.0))
+    try:
+        mcts.close()
+    except Exception:
+        pass
     return examples
 
-def generate_selfplay_data(net, num_games=20, out_path="examples.pkl", board_size=19, n_sim=200, device='cpu'):
-    all_examples = []
-    for i in trange(num_games, desc="Self-play games"):
-        ex = play_game(net, board_size=board_size, n_sim=n_sim, device=device)
-        all_examples.extend(ex)
-    with open(out_path, "wb") as f:
-        pickle.dump(all_examples, f)
-    print(f"Saved {len(all_examples)} examples to {out_path}")
-    return out_path
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--out_dir", type=str, default="examples")
+    parser.add_argument("--games", type=int, default=10)
+    parser.add_argument("--n_sim", type=int, default=200)
+    parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--model", type=str, default=None)
+    args = parser.parse_args()
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    net = AlphaZeroNet(board_size=19, num_filters=128)
+    if args.model and os.path.exists(args.model):
+        net.load_state_dict(torch.load(args.model, map_location='cpu'))
+    net.to(args.device)
+
+    for i in trange(args.games, desc="Self-play games"):
+        ex = play_game(net, board_size=19, n_sim=args.n_sim, device=args.device)
+        outp = os.path.join(args.out_dir, f"examples_worker_{os.getpid()}_{i}.pkl")
+        with open(outp, "wb") as f:
+            pickle.dump(ex, f)
 
 if __name__ == "__main__":
-    board_size = 19
-    net = AlphaZeroNet(board_size=board_size)
-    generate_selfplay_data(net, num_games=10, out_path="examples.pkl", board_size=board_size, n_sim=100)
+    main()
