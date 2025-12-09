@@ -1,16 +1,5 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Apr 28 10:04:19 2020
-
-Maker : bychoi@deu.ac.kr 
-
-@author: Com
-"""
-
-
 from player import *
 from stone import *
-# ★ 우리가 만든 핵심 AI 파일 임포트
 from team05_sjpark import GomokuEngine
 
 class iot6789_student(player):

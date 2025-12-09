@@ -1,13 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Apr 27 15:37:40 2020
-Maker : bychoi@deu.ac.kr 
-
-@author: Com
-"""
-
-# sample player file which must be made by student 
-
 from player import *
 from stone import *
 from team05_jdw import MinimaxEngine
