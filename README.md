@@ -1,329 +1,67 @@
-# Embedded-Omok – White AI Player (`iot12345_student.py`)
+임베디드 시스템 과제 : KataGomo 기반 AlphaGo Zero 스타일 인공지능 모델 병합
 
-## 1. 프로젝트 개요
+본 문서는 본 저장소에 포함된 19×19 Gomoku(연속 다섯목) 게임 구현 및 KataGomo 기반 인공지능 통합에 대해 기술한다. 문서는 연구·개발 보고서 형식으로 구성되어 있으며, 시스템 개요, 아키텍처, 주요 파일 설명, 설치 및 실행 지침, 검증 방법, 확장 가능성 및 참고사항을 포함한다.
 
-이 프로젝트는 콘솔 기반 **오목 게임**이다.
+## 1. 연구 목적 및 개요
 
-- 보드 크기: `19 x 19`
-- 실행 파일: `main.py`
-- 게임 엔진: `omokgame.py`, `board.py`, `stone.py`, `player.py`
-- **학생이 수정 가능한 파일 (과제 조건)**  
-  - `iot6789_student.py` : 흑(Black) 플레이어용 클래스  
-  - `iot12345_student.py` : 백(White) 플레이어용 클래스  
+본 프로젝트의 목적은 다음과 같다.
 
-이번 구현에서의 목표:
+1. Gomoku(19×19) 규칙에 따라 동작하는 게임 엔진을 구현한다.
+2. KataGomo(= KataGo의 Gomoku용 포크)를 GTP(Go Text Protocol)로 연동하여 인공지능 플레이어를 게임에 통합한다.
+3. 인공지능의 제어 및 게임 상태 동기화를 통해 인간-인공지능 대국 환경을 제공한다.
 
-1. **흑돌은 사람(사용자)이 직접 두기**
-2. **백돌은 Minimax + 알파–베타 기반 AI로 자동으로 두기**
-3. 외부 엔진 교체 없이 **두 학생 파일만 수정**해서 구현
+핵심 설계 요소는 책임 분리, GTP를 통한 외부 엔진 통신, 그리고 게임 상태의 일관된 표현이다.
 
----
+## 2. 시스템 아키텍처
 
-## 2. 실행 및 플레이 방식
+시스템은 다음 세 가지 주요 구성 요소로 이루어진다.
 
-### 2.1 실행
+1. 게임 코어: 로컬에서 게임 루프를 관리하고 플레이어(사람 또는 AI) 간의 턴 교환을 담당한다. (`main.py`, `omokgame.py`, `board.py`)
+2. 플레이어 인터페이스: 모든 플레이어는 `player` 추상 인터페이스를 통해 동일한 API로 호출된다. AI는 이 인터페이스를 구현하여 엔진과 통신한다. (`player.py`, `stone.py`)
+3. 외부 AI 엔진: KataGomo 엔진을 서브프로세스로 실행하고 GTP 명령을 주고받아 다음 수를 요청한다. (`katagomo_ai_player.py`, `gomoku_gtp.cfg`, 모델 파일)
 
-```bash
+데이터 흐름은 다음과 같다: 게임 코어가 현재 보드 상태를 플레이어에 전달 → AI 플레이어는 GTP로 엔진에 현재 상태/명령을 전송 → 엔진이 `play <coord>` 형식의 응답을 반환 → 게임 코어가 응답 좌표를 적용 → 보드가 갱신되어 다음 턴으로 진행된다.
+
+## 3. 주요 파일 및 역할
+
+다음은 본 저장소의 주요 파일과 각 파일의 역할에 대한 상세 설명이다.
+
+- `main.py`: 애플리케이션 진입점으로, `omokgame` 인스턴스를 생성하고 게임 루프를 실행한다.
+- `omokgame.py`: 게임 루프, 턴 관리, 유효성 검사 및 승패/무승부 판정 로직을 포함한다. 플레이어 간 상호 작용을 조율한다.
+- `board.py`: 내부 보드 표현(`__game_board`)과 콘솔 출력(좌표 및 기호)을 담당한다. 보드는 정수 값으로 상태를 표현하며(0: 빈칸, 1: 백, -1: 흑), `display()`는 사람이 읽기 쉬운 형식으로 출력한다.
+- `player.py`: 플레이어의 기본 인터페이스를 정의한다. 명령형 `next(board, length)` 메서드를 통해 다음 수를 반환하도록 한다.
+- `stone.py`: 한 수(돌)의 좌표와 색을 캡슐화하는 도메인 객체로, 게임 로직과 인터페이스 간 데이터 전달 역할을 수행한다.
+- `katagomo_ai_player.py`: KataGomo 엔진과의 GTP 통신을 담당하는 AI 래퍼이다. 엔진 프로세스 관리, 표준 에러(stderr) 비동기 수집, `genmove_analyze` 호출 및 응답 파싱을 수행한다. 엔진이 반환하는 최종 `play <coord>` 응답을 파싱하여 보드에 적용한다.
+- `gomoku_gtp.cfg`: KataGomo 엔진 동작에 관한 설정(검색 한도, 스레드 수, 로그 설정 등)을 포함한다.
+- 모델 파일(`*.bin`, `*.bin.gz`): 신경망 가중치 파일로, 대용량이며 별도의 저장 위치를 권장한다.
+
+## 4. 설치 및 실행 방법
+
+### 사전 요구사항
+
+- Python(3.8 이상 권장) 환경이 필요하다.
+- KataGomo 엔진 바이너리와 모델 파일은 로컬에 존재해야 하며, 해당 엔진이 의존하는 라이브러리와 드라이버(CUDA, GPU 드라이버 등)가 올바르게 설치되어 있어야 한다.
+
+### 설치 요약
+
+1. 저장소를 로컬로 클론한다.
+2. KataGomo 엔진 바이너리(예: `engine/gom20x_trt.exe`)를 `engine/` 디렉토리에 배치한다.
+3. 모델 파일(`*.bin`)을 저장소 루트 또는 엔진이 참조하는 경로에 배치한다.
+
+### 실행 방법
+
+다음 명령으로 게임을 실행한다.
+
+```powershell
 python main.py
-````
-
-실행 시 `omokgame(19)`가 생성되고, 내부에서 다음과 같이 플레이어가 설정된다.
-
-```python
-self.__black = iot6789_student(-1)   # 흑
-self.__white = iot12345_student(1)   # 백
 ```
 
-### 2.2 게임 진행
+실행 시 콘솔에 보드가 출력되며, 기본 구성으로 AI가 플레이를 수행한다. 엔진-게임 간 GTP 통신 로그는 `gtp_logs/` 디렉토리에 기록된다.
 
-* **흑(Black) – 사용자**
+## 5. 검증 및 디버깅 지침
 
-  `iot6789_student.next()` 가 호출될 때 내부에서 `player.next()` 를 그대로 사용한다.
-  콘솔에 아래와 같은 입력창이 뜨고, 사용자가 좌표를 넣는다.
-
-  ```text
-  **** Black player : My Turns ****
-  Input position x for new stone :
-  Input position y for new stone :
-  ```
-
-* **백(White) – AI**
-
-  `iot12345_student.next()` 안에서 **AI 로직이 실행**되고,
-  사람이 아무 입력을 하지 않아도 백돌이 자동으로 최선의 수를 선택해 둔다.
-
+1. 엔진 초기화 로그 확인: KataGomo가 모델을 성공적으로 로드하고 `GTP ready` 상태인지 `gtp_logs/*.log`에서 확인한다.
+2. GTP 명령·응답 검증: `genmove_analyze` 호출 시 엔진은 다수의 진단 라인(`INFO`, `Tree` 등)을 출력할 수 있으며, 최종적으로 `play <coord>` 라인을 반환한다. 본 구현의 AI 래퍼는 응답의 다중 라인을 역순으로 조사하여 최종 `play <coord>` 또는 좌표 형태의 토큰을 찾아 적용한다.
+3. 좌표 체계 일치: 내부 보드 좌표(0 기반 행·열)와 GTP 좌표(`A`~`T`, `1`~`19`)의 매핑을 검증한다. 본 구현에서는 컬럼 문자 `A`부터 `T`(I 미포함)를 왼쪽에서 오른쪽으로, 행 숫자는 `1`(하단)에서 `19`(상단)으로 매핑한다.
+4. 이상 응답 처리: 엔진이 `RESIGN` 또는 계산 중간 상태를 보고하는 경우, AI 래퍼는 `RESIGN`을 단순히 재시도가 아닌 대기 상태로 처리하거나 로그를 남긴 뒤 최종 `play`를 받을 때까지 응답을 관찰하도록 구현되어야 한다. 응답 형식 오류, 범위 벗어남, 이미 점유된 칸 등은 예외로 기록한다.
 ---
-
-## 3. 흑 플레이어 – `iot6789_student.py` (사용자 입력 래퍼)
-
-원래 `iot6789_student.py`는 샘플 AI 코드였지만,
-이번 구현에서는 **사람이 직접 흑돌을 두기 위한 래퍼 클래스**로 변경하였다.
-
-```python
-from player import *
-from stone import *
-
-class iot6789_student(player):
-    def __init__(self, clr):
-        super().__init__(clr)
-
-    def __del__(self):
-        pass
-
-    def next(self, board, length):
-        print(" **** Black player : My Turns **** ")
-        # 부모 클래스(player)의 좌표 입력 로직을 그대로 사용
-        return super().next(board, length)
-```
-
-* `player.next()` 에 이미
-
-  * x, y 좌표를 입력받고,
-  * 범위 체크 후,
-  * `stone` 객체를 만들어 반환하는 콘솔 입력 로직이 구현돼 있다.
-* 따라서 `iot6789_student` 는 **형식만 “학생용 클래스”일 뿐, 실제 동작은 사람 입력**이다.
-
-> ※ 필요하면 축(가로/세로) 감각에 맞게 `stn.setX`, `stn.setY` 를 바꿔 끼우는 식으로
-> 좌표계를 조정할 수 있다. (과제 조건 범위 안에서만 수정)
-
----
-
-## 4. 백 플레이어 – `iot12345_student.py` (AI 오목)
-
-`iot12345_student.py` 는 **실제 AI 오목 엔진**이 들어간 부분이다.
-이번 구현은 다음 세 가지 아이디어를 기반으로 작성되었다.
-
-1. **패턴 기반 평가 함수 (Pattern-based Evaluation)**
-2. **후보 수 제한 (Move Candidate Pruning)**
-3. **Minimax + Alpha-Beta Pruning (깊이 2)**
-
-이 과정에서, 외부 오픈소스 프로젝트인
-[five-in-a-row (StuartSul)](https://github.com/StuartSul/five-in-a-row) 를 **직접 포크하지 않고**,
-
-* “줄 단위 패턴을 분석해서 점수화한다”
-* “모든 칸을 탐색하지 않고 일부 유망한 후보만 본다”
-* “Minimax/알파–베타로 게임 트리를 탐색한다”
-
-라는 **알고리즘적 아이디어와 설계 방향만 참고**하였다.
-실제 코드는 과제 조건에 맞게 `iot12345_student.py` 안에서 새로 작성하였다.
-
-### 4.1. 패턴 기반 평가 함수
-
-한 칸 `(x, y)`에 돌을 둔다고 가정했을 때:
-
-* 가로 / 세로 / 두 대각선 방향 `(dx, dy)`에 대해
-* 같은 색 돌이 얼마나 연속으로 이어져 있는지(`count`)
-* 양쪽 끝이 비어 있는지(`open_ends`)를 계산한다.
-
-```python
-def score_direction(self, board, x, y, color, dx, dy, length):
-    count = 1
-    open_ends = 0
-    ...
-    if count >= 5:
-        return 100000   # 승리(5목)
-    if count == 4 and open_ends == 2:
-        return 10000    # 열린 4
-    if count == 4 and open_ends == 1:
-        return 5000     # 막힌 4
-    if count == 3 and open_ends == 2:
-        return 1000     # 열린 3
-    if count == 3 and open_ends == 1:
-        return 200      # 막힌 3
-    if count == 2 and open_ends == 2:
-        return 100      # 열린 2
-    if count == 2 and open_ends == 1:
-        return 10       # 막힌 2
-```
-
-이렇게 해서 **공격/수비에서 중요한 패턴들(4, 열린 3, 열린 2 등)을 높은 점수로 평가**한다.
-이 부분의 아이디어는 five-in-a-row에서 사용되는 “형태별 점수 매기기” 컨셉을 참고해 구현했다.
-
-### 4.2. 한 수에 대한 공격 + 수비 평가
-
-`evaluate_move()` 는 **해당 칸에 내가 두는 경우와 상대가 두는 경우를 모두 시뮬레이션**해서
-공격과 수비를 동시에 고려한다.
-
-```python
-def evaluate_move(self, board, x, y, my_color, opp_color, length):
-    original = board[x][y]
-
-    # 내가 둘 때
-    board[x][y] = my_color
-    my_score = self.score_move(board, x, y, my_color, length)
-    board[x][y] = original
-
-    # 상대가 둘 때 (막아야 하는 위협)
-    board[x][y] = opp_color
-    opp_score = self.score_move(board, x, y, opp_color, length)
-    board[x][y] = original
-
-    return my_score * 1.5 + opp_score * 1.2
-```
-
-* `my_score`   : 내 돌을 두었을 때의 공격적 가치
-* `opp_score`  : 상대가 두었을 때의 위협(수비 필요도)
-
-five-in-a-row의 “공격/수비 모두 점수화해서 합산하는 방식”에서 아이디어를 가져와,
-단순히 **내 형만 보는 AI가 아니라, 위협 수를 우선 차단할 수 있는 AI**가 되도록 했다.
-
-### 4.3. 보드 전체 평가 함수
-
-Minimax의 말단 노드(더 이상 깊이 안 내려갈 때)에서는
-현재 보드를 한 번에 평가하는 함수가 필요하다.
-
-```python
-def evaluate_board(self, board, my_color, opp_color, length):
-    total = 0
-    for x in range(length):
-        for y in range(length):
-            if board[x][y] == my_color:
-                total += self.score_move(board, x, y, my_color, length)
-            elif board[x][y] == opp_color:
-                total -= self.score_move(board, x, y, opp_color, length)
-    return total
-```
-
-* 내 돌은 양수, 상대 돌은 음수로 누적해서
-  `my_color` 기준 전체 스코어를 만든다.
-
----
-
-## 5. 후보 수 줄이기 (Move Candidate Pruning)
-
-19x19 전체 보드(361칸)를 매번 전부 탐색하면 연산량이 너무 커진다.
-그래서 **현재 놓여 있는 돌 주변 일부만 “유망 후보”로 선정**하는 방식을 사용했다.
-
-five-in-a-row 프로젝트에서도 비슷하게 “돌 주변 몇 칸만 후보로 본다”는 전략을 사용하고 있어,
-그 아이디어를 참고하여 아래와 같이 구현했다.
-
-```python
-def generate_candidate_moves(self, board, length, color, my_color, opp_color, max_candidates=12):
-    # 1) 돌이 하나도 없으면: 중앙 한 점
-    # 2) 돌이 있는 최소/최대 x,y를 구해 bounding box 계산
-    # 3) bounding box 주변 margin(2칸)을 확장한 영역만 탐색
-    # 4) 빈 칸들에 대해 evaluate_move로 점수를 구하고,
-    #    상위 max_candidates 개만 후보로 사용
-```
-
-* `max_candidates = 12` 로 설정하여
-  **“좋아 보이는 10~12개의 수”만 Minimax 탐색 대상으로 사용**한다.
-* 이렇게 하면:
-
-  * **연산량은 크게 줄이면서도**,
-  * “현재 돌 주변에서 의미 있는 수”는 대부분 고려할 수 있다.
-
----
-
-## 6. Minimax + Alpha-Beta (깊이 2)
-
-### 6.1. Minimax 구조
-
-```python
-def minimax(self, board, depth, alpha, beta,
-            maximizing, my_color, opp_color, length,
-            last_move=None, last_color=None):
-    # 1. 직전 수(last_move)가 5목을 만들었는지 검사
-    #    -> 이겼으면 +1_000_000, 졌으면 -1_000_000 반환
-
-    # 2. depth == 0, 또는 둘 곳이 없으면 evaluate_board 반환
-
-    # 3. maximizing 단계 (내 차례)
-    #    - generate_candidate_moves()로 후보 생성
-    #    - 각 후보에 대해 재귀 호출
-    #    - value = max(value, child_score)
-    #    - alpha / beta 갱신 및 가지치기
-
-    # 4. minimizing 단계 (상대 차례)
-    #    - 위와 동일하지만 min / beta 중심
-```
-
-* `depth = 2` 를 사용:
-
-  * 루트(백 차례)에서
-
-    * 백이 한 수 둔다 → (depth 1)
-    * 흑이 응수한다 → (depth 0)
-  * **“내 수 → 상대 수”까지 보는 2수 탐색** 구조
-
-* **Alpha-Beta Pruning** 덕분에
-  모든 후보를 끝까지 보지 않고도
-  “더 볼 가치가 없는 가지”는 중간에 잘라낸다.
-
-five-in-a-row 프로젝트도 Minimax/알파–베타를 사용하고 있으며,
-이번 구현은 그 개념을 참고해서 **현재 과제 엔진 구조와 시간 제한(5초) 안에서 돌아가도록 단순화한 버전**이다.
-
-### 6.2. `next()`에서의 실제 사용
-
-`iot12345_student.next()` 의 흐름:
-
-1. **초기 상태**
-
-   * 보드에 돌이 하나도 없으면 → 중앙에 둔다.
-2. **그 외 일반 상황**
-
-   * `generate_candidate_moves(...)` 로 후보 좌표 리스트 생성
-   * 각 후보 `(x, y)`에 대해:
-
-     * 백이 `(x, y)`에 둔다고 가정하고 보드에 임시로 놓은 뒤
-     * `minimax(..., depth=1, maximizing=False, last_move=(x, y))` 호출
-   * Minimax 결과 점수 중 **최고 점수를 가진 후보들을 모두 모으고**,
-     그 중 **랜덤으로 한 수를 최종 선택**한다.
-3. 선택된 좌표를 `stone` 객체에 담아 반환:
-
-   ```python
-   stn.setX(bx)
-   stn.setY(by)
-   print(" === White player was completed ==== ")
-   return stn
-   ```
-
----
-
-## 7. 난이도 조절 방법 (옵션)
-
-AI 난이도를 바꾸고 싶을 때 수정하면 되는 포인트들:
-
-1. **탐색 깊이**
-
-   ```python
-   depth = 2
-   ```
-
-   * `1`로 낮추면 → 단순 휴리스틱 그리디에 가까워져 **약해짐**
-   * `3` 이상으로 올리면 → 강해지지만 Python 속도/5초 제한을 고려해야 함
-
-2. **후보 수 개수**
-
-   ```python
-   max_candidates = 12
-   ```
-
-   * 6, 4 등으로 줄이면 → 탐색 폭이 좁아져 **실수도 많아지고 난이도 다운**
-
-3. **공격/수비 가중치**
-
-   ```python
-   total = my_score * 1.5 + opp_score * 1.2
-   ```
-
-   * `my_score` 비율을 키우면 → 더 공격적인 AI
-   * `opp_score` 비율을 키우면 → 위협 수를 더 적극적으로 막는 수비형 AI
-
----
-
-## 8. 제한 사항 및 참고
-
-* **3x3 금수, 장목 금지 규칙은 구현되어 있지 않다.**
-  `omokgame.validCheck()`는 현재 “이미 돌이 있는 칸인지(겹쳐두기 여부)”만 검사한다.
-* `omokgame`에서 한 턴당 `next()` 실행 시간이 **5초를 넘으면 해당 턴이 넘어가는 로직**이 있으므로,
-  흑(사용자) 입력은 5초 이내에 하는 것이 안전하다.
-* AI는 five-in-a-row 프로젝트에서 사용된 개념들(패턴 기반 평가, 후보 제한, Minimax/알파–베타)을 참고해
-  **과제 엔진 구조와 파일 제한 안에서 새로 구현한 버전**이다.
-  외부 코드를 직접 가져오거나, 엔진 전체를 교체하지 않았다.
-
----
-
-```
-::contentReference[oaicite:0]{index=0}
-```

@@ -9,10 +9,12 @@ Maker : bychoi@deu.ac.kr
 import copy  #깊은 복사를 하기위한 모듈 ( modified by DS Koo)
 from board import *
 from player import *
-from iot6789_student import *
+#from iot6789_student import *
 from stone import *
 from iot12345_student import *
+from katagomo_ai_player import *
 #from iot6789_student import *
+from iot678910_student import iot6789_student
 import time  # append by bychoi
 
 
@@ -21,8 +23,9 @@ class omokgame:
         self.__size=sz
         self.__bd = board(self.__size)
         #self.__black = player(-1)
-        self.__black = iot6789_student(-1)
-        self.__white = iot12345_student(1)
+        # Use KataGomo AI for black player
+        self.__black = katagomo_ai_player(-1)
+        self.__white = iot6789_student(1)
         self.__turns=0
         self.__next= -1
         self.__draw = 0
@@ -49,10 +52,13 @@ class omokgame:
                     end = time.time()
                     time_delay = end - start   # exec_time= next() method
                     time_b +=1 
-                    if ((time_b >= 4) or (self.validCheck(stn_b) and (time_delay < 5)) ): # person: time_delay=100 
+                    if ((time_b >= 4) or (self.validCheck(stn_b) and (time_delay < 5)) ): # person: time_delay=100
                         break
                 if (time_b < 4) :
                     self.__bd.update(stn_b)
+                    # Notify white player (opponent) about black's move if it's an AI
+                    if hasattr(self.__white, 'update_opponent_move'):
+                        self.__white.update_opponent_move(stn_b.getX(), stn_b.getY())
                 else:
                     print("Too many wrong input or long time, black's turn is over")
                 self.__next = self.__next * (-1)
@@ -67,10 +73,13 @@ class omokgame:
                     end1 = time.time()
                     time_delay1 = end1 - start1   # exec_time= next() method
                     time_w += 1
-                    if ((time_w >= 4) or (self.validCheck(stn_w) and (time_delay1 < 5)) ): 
+                    if ((time_w >= 4) or (self.validCheck(stn_w) and (time_delay1 < 5)) ): # person: time_delay=100
                         break
                 if (time_w < 4):
                     self.__bd.update(stn_w)
+                    # Notify black player (opponent) about white's move if it's an AI
+                    if hasattr(self.__black, 'update_opponent_move'):
+                        self.__black.update_opponent_move(stn_w.getX(), stn_w.getY())
                 else:
                     print("Too many wrong input or long time, white's turn is over")
                 self.__next = self.__next * (-1)
