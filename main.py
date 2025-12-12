@@ -5,7 +5,6 @@ Maker : bychoi@deu.ac.kr
 @author: Com
 """
 from omokgame import *
-import msvcrt
 
 
 def main():
@@ -17,6 +16,6 @@ def main():
 
 if __name__ =="__main__":
     main()
-    #msvcrt.getch() # wait for key input 
-    s = input() # wait for key input
+    # Wait for key input 
+    s = input("Press Enter to exit...")
 

@@ -1,3 +1,12 @@
-__pycache__
-.vscode
-.idea
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# KataGo/GTP logs
+gtp_logs/
+
+# Test output files
+*.log
